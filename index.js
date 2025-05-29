@@ -1,13 +1,15 @@
 // Загружаем переменные окружения из .env файла
 require('dotenv').config();
 
-const { Client, LocalAuth } = require('whatsapp-web.js');
-const qrcode = require('qrcode-terminal');
 const express = require('express');
-const { google } = require('googleapis');
 const fs = require('fs');
 const path = require('path');
-const { handleMessage } = require('./botHandlers');
+const { google } = require('googleapis');
+const { handleWebhookMessage } = require('./cloudApiHandlers');
+
+// Получаем токен для верификации вебхуков
+const WEBHOOK_VERIFY_TOKEN =
+  process.env.WEBHOOK_VERIFY_TOKEN || 'your_verify_token';
 
 // Настройка Express сервера
 const app = express();
@@ -16,37 +18,43 @@ const PORT = process.env.PORT || 3000;
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Инициализация WhatsApp клиента
-const client = new Client({
-  authStrategy: new LocalAuth(),
-  puppeteer: {
-    args: ['--no-sandbox'],
-  },
+// Обработка GET запросов на вебхук (для верификации от Facebook)
+app.get('/webhook', (req, res) => {
+  // Параметр hub.verify_token проверяется с токеном, указанным при настройке вебхука
+  const mode = req.query['hub.mode'];
+  const token = req.query['hub.verify_token'];
+  const challenge = req.query['hub.challenge'];
+
+  // Проверяем, что режим и токен верны
+  if (mode === 'subscribe' && token === WEBHOOK_VERIFY_TOKEN) {
+    // Отвечаем подтверждением
+    console.log('Вебхук подтвержден!');
+    res.status(200).send(challenge);
+  } else {
+    // Неверный токен
+    console.error('Ошибка верификации вебхука');
+    res.sendStatus(403);
+  }
 });
 
-// Обработка события создания QR-кода
-client.on('qr', (qr) => {
-  console.log('QR КОД ПОЛУЧЕН, отсканируйте его в приложении WhatsApp:');
-  qrcode.generate(qr, { small: true });
-});
-
-// Обработка события готовности клиента
-client.on('ready', () => {
-  console.log('WhatsApp бот запущен и готов к работе!');
-});
-
-// Обработка входящих сообщений
-client.on('message', async (message) => {
-  console.log(`Сообщение от ${message.from}: ${message.body}`);
-
-  // Используем обработчик из botHandlers.js
+// Обработка POST запросов на вебхук (входящие сообщения)
+app.post('/webhook', express.json(), async (req, res) => {
   try {
-    await handleMessage(message);
+    // Проверяем, что запрос содержит данные WhatsApp
+    if (req.body.object === 'whatsapp_business_account') {
+      // Обрабатываем сообщение
+      await handleWebhookMessage(req.body);
+
+      // Всегда отвечаем успешным статусом, чтобы Facebook не пытался отправить сообщение повторно
+      res.sendStatus(200);
+    } else {
+      // Получен не WhatsApp запрос
+      res.sendStatus(404);
+    }
   } catch (error) {
-    console.error('Ошибка при обработке сообщения:', error);
-    message.reply(
-      'Произошла ошибка при обработке вашего запроса. Пожалуйста, попробуйте позже.'
-    );
+    console.error('Ошибка при обработке вебхука:', error);
+    // Все равно отвечаем успехом, чтобы Facebook не пытался отправить повторно
+    res.sendStatus(200);
   }
 });
 
@@ -62,10 +70,17 @@ app.get('/status', (req, res) => {
   });
 });
 
-// Запуск WhatsApp клиента
-client.initialize();
-
 // Запуск Express сервера
 app.listen(PORT, () => {
   console.log(`Сервер запущен на порту ${PORT}`);
+  console.log(`Webhook URL: http://your-domain.com/webhook`);
+  console.log('Для использования WhatsApp Cloud API необходимо:');
+  console.log('1. Создать бизнес-аккаунт в Meta Business Suite');
+  console.log('2. Подключить номер телефона к WhatsApp Business API');
+  console.log(
+    '3. Настроить вебхук в Meta for Developers, указав URL и токен верификации'
+  );
+  console.log(
+    '4. Установить токен доступа в переменную окружения WHATSAPP_TOKEN'
+  );
 });

@@ -2,7 +2,12 @@ const { google } = require('googleapis');
 const fs = require('fs');
 const path = require('path');
 
-// Путь к файлу с учетными данными
+// Проверяем наличие учетных данных из переменной окружения
+const GOOGLE_CREDENTIALS = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON
+  ? JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON)
+  : null;
+
+// Путь к файлу с учетными данными (для локальной разработки)
 const CREDENTIALS_PATH = path.join(__dirname, 'credentials.json');
 const TOKEN_PATH = path.join(__dirname, 'token.json');
 
@@ -11,6 +16,19 @@ const TOKEN_PATH = path.join(__dirname, 'token.json');
  */
 async function getAuthClient() {
   try {
+    // Проверяем наличие учетных данных Service Account в переменных окружения
+    if (GOOGLE_CREDENTIALS) {
+      console.log('Используем Service Account из переменной окружения');
+      const auth = new google.auth.GoogleAuth({
+        credentials: GOOGLE_CREDENTIALS,
+        scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+      });
+      return auth;
+    }
+
+    // Для локальной разработки используем OAuth2
+    console.log('Используем локальные учетные данные OAuth2');
+
     // Проверяем наличие файла с учетными данными
     if (!fs.existsSync(CREDENTIALS_PATH)) {
       throw new Error(
